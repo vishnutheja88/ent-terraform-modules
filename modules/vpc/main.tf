@@ -1,6 +1,6 @@
 ############################################################
 # Wrapper: org-standard VPC on top of terraform-aws-modules/vpc
-# Small, stable interface for values.yaml; upstream has ~250 inputs.
+# Small, stable interface for the values file; upstream has ~250 inputs.
 ############################################################
 
 data "aws_availability_zones" "available" {

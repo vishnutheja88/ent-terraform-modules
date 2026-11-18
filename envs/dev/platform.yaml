@@ -1,7 +1,8 @@
 # ------------------------------------------------------------------
-# The ONLY file app teams edit. Flip toggles -> PR -> merge.
+# Platform values (VPC, EC2, IAM, Route53, EKS). Flip toggles -> PR -> merge.
 # Pipeline: schema check -> plan -> (approval) -> apply
 # ------------------------------------------------------------------
+blueprint: platform
 env: dev
 region: us-east-1
 name_prefix: ent

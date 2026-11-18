@@ -1,3 +1,4 @@
+blueprint: platform
 env: prod
 region: us-east-1
 name_prefix: ent

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "app-s3-irsa blueprint values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["blueprint", "env", "region", "app", "cluster_name", "irsa"],
+  "$defs": {
+    "dns1123": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" }
+  },
+  "properties": {
+    "blueprint": { "const": "app-s3-irsa" },
+    "env": { "type": "string", "pattern": "^[a-z0-9-]{2,20}$" },
+    "region": { "type": "string", "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$" },
+    "app": { "type": "string", "pattern": "^[a-z0-9-]{2,30}$" },
+    "cluster_name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$" },
+    "account_role": { "type": "string", "pattern": "^arn:aws[a-z-]*:iam::[0-9]{12}:role/.+$" },
+    "permissions_boundary_arn": { "type": "string", "pattern": "^arn:aws[a-z-]*:iam::[0-9]{12}:policy/.+$" },
+    "tags": { "type": "object", "additionalProperties": { "type": "string" } },
+    "s3": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "versioning": { "type": "boolean" },
+        "expire_days": { "type": "integer", "minimum": 1, "maximum": 3650 },
+        "kms_key_arn": { "type": "string", "pattern": "^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+$" },
+        "force_destroy": { "type": "boolean" }
+      }
+    },
+    "irsa": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "service_account"],
+      "properties": {
+        "namespace": { "$ref": "#/$defs/dns1123" },
+        "service_account": { "$ref": "#/$defs/dns1123" },
+        "access": { "type": "string", "enum": ["read-only", "read-write"] }
+      }
+    }
+  }
+}

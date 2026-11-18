@@ -4,7 +4,8 @@ repository_id   = "vishnutheja88/ent-terraform-modules"
 branch          = "main"
 approver_emails = ["you@example.com"]
 
-environments = {
-  dev  = { require_approval = false }
-  prod = { require_approval = true }
+pipelines = {
+  dev-platform  = { values_file = "envs/dev/platform.yaml", require_approval = false }
+  prod-platform = { values_file = "envs/prod/platform.yaml", require_approval = true }
+  dev-orders    = { values_file = "envs/dev/apps/orders.yaml", require_approval = false }
 }

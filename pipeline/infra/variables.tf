@@ -19,14 +19,19 @@ variable "branch" {
   default = "main"
 }
 
-variable "environments" {
-  description = "One pipeline per env folder under envs/"
+variable "pipelines" {
+  description = <<-EOT
+    One CodePipeline per values file. The blueprint is read from the file's "blueprint:" key.
+    Add an app: create envs/<env>/apps/<app>.yaml and add an entry here.
+  EOT
   type = map(object({
+    values_file      = string
     require_approval = bool
   }))
   default = {
-    dev  = { require_approval = false }
-    prod = { require_approval = true }
+    dev-platform  = { values_file = "envs/dev/platform.yaml", require_approval = false }
+    prod-platform = { values_file = "envs/prod/platform.yaml", require_approval = true }
+    dev-orders    = { values_file = "envs/dev/apps/orders.yaml", require_approval = false }
   }
 }
 
@@ -34,19 +39,19 @@ variable "shared_trigger_paths" {
   description = "Changes here re-run every env pipeline"
   type        = list(string)
   default     = []
-  # e.g. ["blueprint/**", "modules/**"] — off by default so a module change
+  # e.g. ["blueprints/**", "modules/**"] — off by default so a module change
   # doesn't auto-roll prod; bump module refs per env instead.
 }
 
 variable "target_deploy_role_arns" {
-  description = "Cross-account deploy roles CodeBuild may assume (account_role in values.yaml)"
+  description = "Cross-account deploy roles CodeBuild may assume (account_role in the values file)"
   type        = list(string)
   default     = ["arn:aws:iam::*:role/tf-deploy"]
 }
 
 variable "same_account_deploy_policy_arns" {
   description = <<-EOT
-    Policies for same-account deploys (no account_role in values.yaml).
+    Policies for same-account deploys (no account_role in the values file).
     EKS + IAM + Route53 need broad rights, so the lab default is AdministratorAccess.
     In an enterprise, leave this empty and deploy through a scoped cross-account tf-deploy role.
   EOT

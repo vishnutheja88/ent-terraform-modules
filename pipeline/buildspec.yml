@@ -1,6 +1,8 @@
-# One buildspec for every stage. CodePipeline passes:
-#   ENV   = dev | prod          (which envs/<ENV>/values.yaml)
-#   STAGE = plan | apply
+# One buildspec for every blueprint and stage. CodePipeline passes:
+#   VALUES_FILE = path in the repo, e.g. envs/dev/platform.yaml or envs/dev/apps/orders.yaml
+#   STAGE       = plan | apply
+# The blueprint to run is read from the values file itself (its "blueprint:" key),
+# and each values file gets its own state: ent-tf/<path under envs/ without .yaml>.tfstate
 #   TF_STATE_BUCKET, TF_STATE_REGION  (set on the CodeBuild project)
 version: 0.2
 
@@ -18,7 +20,7 @@ phases:
       - echo "Installing Terraform ${TF_VERSION}"
       - curl -sSLo /tmp/tf.zip "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
       - unzip -o -q /tmp/tf.zip -d /usr/local/bin && terraform version
-      - pip install --quiet check-jsonschema checkov
+      - pip install --quiet check-jsonschema checkov pyyaml
       # Private Bitbucket module auth (git:: sources)
       - |
         if [ -n "${BB_TOKEN:-}" ]; then
@@ -27,13 +29,17 @@ phases:
 
   pre_build:
     commands:
-      - VALUES="$CODEBUILD_SRC_DIR/envs/${ENV}/values.yaml"
+      - VALUES="$CODEBUILD_SRC_DIR/${VALUES_FILE}"
       - test -f "$VALUES" || { echo "Missing $VALUES"; exit 1; }
-      - cd "$CODEBUILD_SRC_DIR/blueprint"
+      - BLUEPRINT=$(python3 -c "import sys,yaml; print(yaml.safe_load(open(sys.argv[1]))['blueprint'])" "$VALUES")
+      - test -d "$CODEBUILD_SRC_DIR/blueprints/$BLUEPRINT" || { echo "Unknown blueprint '$BLUEPRINT'"; exit 1; }
+      - STATE_KEY="ent-tf/$(echo "${VALUES_FILE#envs/}" | sed 's/\.yaml$//').tfstate"
+      - echo "Blueprint=$BLUEPRINT  Values=$VALUES_FILE  State=$STATE_KEY"
+      - cd "$CODEBUILD_SRC_DIR/blueprints/$BLUEPRINT"
       - |
         terraform init -input=false \
           -backend-config="bucket=${TF_STATE_BUCKET}" \
-          -backend-config="key=ent-tf/${ENV}/terraform.tfstate" \
+          -backend-config="key=${STATE_KEY}" \
           -backend-config="region=${TF_STATE_REGION}"
 
   build:
@@ -41,8 +47,8 @@ phases:
       - |
         set -e
         if [ "$STAGE" = "plan" ]; then
-          echo "== 1. Schema validation of values.yaml"
-          check-jsonschema --schemafile "$CODEBUILD_SRC_DIR/schema/values.schema.json" "$VALUES"
+          echo "== 1. Schema validation of $VALUES_FILE"
+          check-jsonschema --schemafile "$CODEBUILD_SRC_DIR/schema/${BLUEPRINT}.schema.json" "$VALUES"
 
           echo "== 2. fmt + validate"
           terraform fmt -check -recursive "$CODEBUILD_SRC_DIR" || echo "WARN: run 'terraform fmt -recursive' before committing"
@@ -69,4 +75,4 @@ artifacts:
   files:
     - "**/*"
   exclude-paths:
-    - "blueprint/.terraform/**/*"
+    - "blueprints/*/.terraform/**/*"

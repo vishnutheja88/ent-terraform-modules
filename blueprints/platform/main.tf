@@ -1,6 +1,6 @@
 ##########################################################################
 # Blueprint = Rafay "Environment Template"
-# values.yaml toggles  ->  which wrapper modules run  ->  upstream modules
+# The values file toggles  ->  which wrapper modules run  ->  upstream modules
 ##########################################################################
 
 locals {
@@ -30,7 +30,7 @@ locals {
     try(local.cfg.tags, {})
   )
 
-  # Network inputs: from our VPC, or from an existing VPC listed in values.yaml
+  # Network inputs: from our VPC, or from an existing VPC listed in the values file
   vpc_id             = local.vpc_on ? one(module.vpc[*].vpc_id) : try(local.cfg.existing_network.vpc_id, null)
   private_subnet_ids = local.vpc_on ? one(module.vpc[*].private_subnet_ids) : tolist(try(local.cfg.existing_network.private_subnet_ids, []))
   public_subnet_ids  = local.vpc_on ? one(module.vpc[*].public_subnet_ids) : tolist(try(local.cfg.existing_network.public_subnet_ids, []))
@@ -79,7 +79,7 @@ resource "terraform_data" "rules" {
 
 module "vpc" {
   count  = local.vpc_on ? 1 : 0
-  source = "../modules/vpc"
+  source = "../../modules/vpc"
 
   name               = local.name
   cidr               = local.cfg.vpc.cidr
@@ -95,7 +95,7 @@ module "vpc" {
 }
 
 module "iam_role" {
-  source   = "../modules/iam-role"
+  source   = "../../modules/iam-role"
   for_each = { for k, v in try(local.cfg.iam.roles, {}) : k => v if local.iam_on }
 
   name                     = "${local.name}-${each.key}"
@@ -112,7 +112,7 @@ module "iam_role" {
 
 module "ec2" {
   count  = local.ec2_on ? 1 : 0
-  source = "../modules/ec2"
+  source = "../../modules/ec2"
 
   name           = local.name
   instance_count = try(local.cfg.ec2.count, 1)
@@ -131,7 +131,7 @@ module "ec2" {
 
 module "eks" {
   count  = local.eks_on ? 1 : 0
-  source = "../modules/eks"
+  source = "../../modules/eks"
 
   name                         = local.eks_name
   kubernetes_version           = local.cfg.eks.version
@@ -148,7 +148,7 @@ module "eks" {
 
 module "route53" {
   count  = local.route53_on ? 1 : 0
-  source = "../modules/route53"
+  source = "../../modules/route53"
 
   zone_name    = local.cfg.route53.zone_name
   private_zone = try(local.cfg.route53.private, true)

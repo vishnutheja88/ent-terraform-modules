@@ -1,0 +1,23 @@
+# ------------------------------------------------------------------
+# App values: one S3 bucket + one IRSA role for the "orders" service.
+# Plugs into the existing dev cluster; has its own Terraform state.
+# ------------------------------------------------------------------
+blueprint: app-s3-irsa
+env: dev
+region: us-east-1
+app: orders
+cluster_name: ent-dev-eks      # created by envs/dev/platform.yaml (eks.enabled: true)
+# account_role: arn:aws:iam::111122223333:role/tf-deploy
+
+tags:
+  Owner: orders-team
+
+s3:
+  versioning: true
+  expire_days: 90              # optional: delete objects after 90 days
+  force_destroy: true          # dev only: allow destroy of a non-empty bucket
+
+irsa:
+  namespace: orders
+  service_account: orders-api
+  access: read-write           # read-only | read-write

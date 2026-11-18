@@ -1,6 +1,6 @@
 ############################################################
 # Wrapper: IAM role on top of terraform-aws-modules/iam//modules/iam-role
-# values.yaml says "who can assume it" + "which policies"; we build the trust doc.
+# The values file says "who can assume it" + "which policies"; we build the trust doc.
 ############################################################
 
 locals {

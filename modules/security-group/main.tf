@@ -1,6 +1,6 @@
 ############################################################
 # Wrapper: security group on top of terraform-aws-modules/security-group
-# values.yaml gives ports + CIDRs; we build upstream's rule maps.
+# The values file gives ports + CIDRs; we build upstream's rule maps.
 ############################################################
 
 locals {

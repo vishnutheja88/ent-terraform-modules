@@ -108,7 +108,7 @@ resource "aws_iam_role_policy" "codebuild" {
   policy = data.aws_iam_policy_document.codebuild.json
 }
 
-# Same-account deploys (no account_role in values.yaml) need resource permissions.
+# Same-account deploys (no account_role in the values file) need resource permissions.
 # Tighten these for real use, or deploy cross-account only.
 resource "aws_iam_role_policy_attachment" "codebuild_deploy" {
   for_each   = toset(var.same_account_deploy_policy_arns)
@@ -199,9 +199,9 @@ resource "aws_sns_topic_subscription" "approvers" {
   endpoint  = each.value
 }
 
-# ---------------- One pipeline per environment ----------------
+# ---------------- One pipeline per values file (platform per env, one per app) ----------------
 resource "aws_codepipeline" "env" {
-  for_each = var.environments
+  for_each = var.pipelines
 
   name          = "${local.prefix}-${each.key}"
   role_arn      = aws_iam_role.pipeline.arn
@@ -212,7 +212,7 @@ resource "aws_codepipeline" "env" {
     type     = "S3"
   }
 
-  # Only run when THIS env's values change (or shared blueprint/modules change)
+  # Only run when THIS values file changes (or the shared paths you opt into)
   trigger {
     provider_type = "CodeStarSourceConnection"
     git_configuration {
@@ -222,7 +222,7 @@ resource "aws_codepipeline" "env" {
           includes = [var.branch]
         }
         file_paths {
-          includes = concat(["envs/${each.key}/**"], var.shared_trigger_paths)
+          includes = concat([each.value.values_file], var.shared_trigger_paths)
         }
       }
     }
@@ -259,7 +259,7 @@ resource "aws_codepipeline" "env" {
       configuration = {
         ProjectName = aws_codebuild_project.tf.name
         EnvironmentVariables = jsonencode([
-          { name = "ENV", value = each.key, type = "PLAINTEXT" },
+          { name = "VALUES_FILE", value = each.value.values_file, type = "PLAINTEXT" },
           { name = "STAGE", value = "plan", type = "PLAINTEXT" },
         ])
       }
@@ -278,7 +278,7 @@ resource "aws_codepipeline" "env" {
         version  = "1"
         configuration = {
           NotificationArn = aws_sns_topic.approvals.arn
-          CustomData      = "Review the plan in the Plan stage CodeBuild logs (plan.txt) for env=${each.key}"
+          CustomData      = "Review the plan in the Plan stage CodeBuild logs (plan.txt) for ${each.value.values_file}"
         }
       }
     }
@@ -296,7 +296,7 @@ resource "aws_codepipeline" "env" {
       configuration = {
         ProjectName = aws_codebuild_project.tf.name
         EnvironmentVariables = jsonencode([
-          { name = "ENV", value = each.key, type = "PLAINTEXT" },
+          { name = "VALUES_FILE", value = each.value.values_file, type = "PLAINTEXT" },
           { name = "STAGE", value = "apply", type = "PLAINTEXT" },
         ])
       }
