@@ -14,6 +14,7 @@ Upgrade with `scripts/sync-upstream.sh` — never edit these folders by hand exc
 | terraform-aws-kms | terraform-aws-modules/terraform-aws-kms | v4.2.2 |
 | terraform-aws-security-group | terraform-aws-modules/terraform-aws-security-group | v6.0.0 |
 | terraform-aws-s3-bucket | terraform-aws-modules/terraform-aws-s3-bucket | v5.18.0 |
+| terraform-aws-rds | terraform-aws-modules/terraform-aws-rds | v7.2.2 |
 
 ## Local patches (re-applied automatically by the sync script)
 
@@ -26,5 +27,6 @@ Nested Registry calls rewritten to the vendored copy so CI never reaches the pub
 
 ## Provider floor (union of all modules)
 
-- `hashicorp/aws >= 6.59` (EKS v21; s3-bucket v5.18 needs >= 6.44)
+- `hashicorp/aws >= 6.59` (EKS v21; s3-bucket v5.18 needs >= 6.44; rds v7.2 needs >= 6.28)
+- Terraform `>= 1.11.1` (rds v7)
 - `hashicorp/tls >= 4.0`, `hashicorp/time >= 0.9` (EKS)

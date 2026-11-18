@@ -1,0 +1,23 @@
+region      = "us-east-1"
+name_prefix = "plat"
+
+source_provider                 = "GitHub"
+platform_repo_url               = "https://github.com/my-org/platform-terraform-modules.git"
+platform_repo_token_secret_name = "platform/terraform-modules-read-token"
+
+# From: terraform -chdir=../pki output -raw subordinate_ca_arn
+subordinate_ca_arn = "arn:aws:acm-pca:us-east-1:111111111111:certificate-authority/00000000-0000-0000-0000-000000000000"
+
+teams = {
+  payments = {
+    repository   = "my-org/app-team-payments-infra"
+    environments = ["dev", "staging", "prod"]
+  }
+  orders = {
+    repository   = "my-org/app-team-orders-infra"
+    environments = ["dev", "prod"]
+  }
+}
+
+approver_emails     = ["prod-approvers@example.com"]
+notification_emails = ["platform-team@example.com"]

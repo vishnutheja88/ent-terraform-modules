@@ -1,0 +1,18 @@
+---
+# HTTPS listeners must use the platform's TLS 1.2/1.3 policy.
+metadata:
+  id: "CKV2_PLAT_5"
+  name: "ALB HTTPS listeners must use ELBSecurityPolicy-TLS13-1-2-2021-06"
+  category: "ENCRYPTION"
+definition:
+  or:
+    - cond_type: "attribute"
+      resource_types: ["aws_lb_listener"]
+      attribute: "protocol"
+      operator: "not_equals"
+      value: "HTTPS"
+    - cond_type: "attribute"
+      resource_types: ["aws_lb_listener"]
+      attribute: "ssl_policy"
+      operator: "equals"
+      value: "ELBSecurityPolicy-TLS13-1-2-2021-06"

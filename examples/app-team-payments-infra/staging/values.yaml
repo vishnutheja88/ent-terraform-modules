@@ -1,0 +1,42 @@
+# app-team-payments-infra / staging  (no approval gate)
+platform_version: "v1.0.0"
+
+team: payments
+environment: staging
+app_name: checkout
+region: us-east-1
+
+tags:
+  CostCenter: "4410"
+  Owner: payments-team
+
+networking:
+  enabled: true
+  vpc_cidr: 10.41.0.0/16
+  az_count: 2
+  nat_gateway: single
+
+tls:
+  enabled: true
+  domain_name: checkout.payments.staging.corp.internal
+
+ecs:
+  enabled: true
+  alb_ingress_cidrs: [10.0.0.0/8]
+  services:
+    api:
+      image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/checkout-api:1.4.2
+      cpu: 512
+      memory: 1024
+      desired_count: 2
+      container_port: 8080
+
+rds:
+  enabled: true
+  engine: postgres
+  engine_version: "16"
+  instance_class: db.t4g.medium
+  allocated_storage: 50
+  max_allocated_storage: 200
+  multi_az: false
+  db_name: checkout

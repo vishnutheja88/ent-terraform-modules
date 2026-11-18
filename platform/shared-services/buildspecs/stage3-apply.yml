@@ -1,0 +1,82 @@
+# =============================================================================
+# STAGE 5 - Cross-account apply (CodeBuild Stage 3)
+#
+# Input : "planned_workspace" from Stage 2 (contains the binary tfplan)
+# Rule  : NEVER apply without the saved plan. No re-plan, no -var flags.
+# Certs : if tls.enabled, the plan already contains aws_acm_certificate with
+#         certificate_authority_arn = RAM-shared Subordinate CA (modules/acm-private-cert)
+# IAM needed: same as Stage 2
+# =============================================================================
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    commands:
+      - |
+        set -euo pipefail
+        cd /tmp
+        curl -sSfLO "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+        curl -sSfLO "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_SHA256SUMS"
+        grep "terraform_${TF_VERSION}_linux_amd64.zip" "terraform_${TF_VERSION}_SHA256SUMS" | sha256sum -c -
+        unzip -o -q "terraform_${TF_VERSION}_linux_amd64.zip" -d /usr/local/bin
+
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+        WS="$CODEBUILD_SRC_DIR"
+        source "$WS/.platform/metadata.env"
+        [ -s "$WS/stack-wrapper/tfplan" ] || { echo "ERROR: no saved tfplan from Stage 2; refusing to apply"; exit 1; }
+
+        # Defense in depth: the registry entry must still point where Stage 1 said.
+        ITEM=$(aws dynamodb get-item --consistent-read --table-name "$REGISTRY_TABLE" \
+                 --key "{\"registry_key\":{\"S\":\"${REGISTRY_KEY}\"}}" --output json)
+        [ "$(echo "$ITEM" | jq -r '.Item.cross_account_role_arn.S')" = "$ROLE_ARN" ] || { echo "ERROR: registry role changed"; exit 1; }
+        [ "$(echo "$ITEM" | jq -r '.Item.tf_state_key.S')" = "$STATE_KEY" ] || { echo "ERROR: registry state key changed"; exit 1; }
+        EXTERNAL_ID=$(echo "$ITEM" | jq -r '.Item.external_id.S')
+
+        # Re-assume the spoke role (fresh credentials for the apply).
+        CREDS=$(aws sts assume-role \
+                  --role-arn "$ROLE_ARN" \
+                  --role-session-name "plat-apply-${ENVIRONMENT}-${COMMIT_ID:0:12}" \
+                  --external-id "$EXTERNAL_ID" \
+                  --tags "Key=platform-repo,Value=${REPO_NAME}" "Key=platform-env,Value=${ENVIRONMENT}" \
+                  --duration-seconds 3600 --output json)
+        aws configure set aws_access_key_id     "$(echo "$CREDS" | jq -r .Credentials.AccessKeyId)"     --profile spoke
+        aws configure set aws_secret_access_key "$(echo "$CREDS" | jq -r .Credentials.SecretAccessKey)" --profile spoke
+        aws configure set aws_session_token     "$(echo "$CREDS" | jq -r .Credentials.SessionToken)"    --profile spoke
+        unset CREDS EXTERNAL_ID
+        [ "$(aws sts get-caller-identity --profile spoke --query Account --output text)" = "$TARGET_ACCOUNT_ID" ] \
+          || { echo "ERROR: assumed role is not in $TARGET_ACCOUNT_ID"; exit 1; }
+
+  build:
+    commands:
+      - |
+        set -euo pipefail
+        WS="$CODEBUILD_SRC_DIR"
+        source "$WS/.platform/metadata.env"
+        cd "$WS/stack-wrapper"
+        export TF_IN_AUTOMATION=true TF_INPUT=0
+
+        # Same backend as the plan; the lock file (.terraform.lock.hcl) came with the artifact.
+        terraform init \
+          -backend-config="bucket=${TF_STATE_BUCKET}" \
+          -backend-config="key=${STATE_KEY}" \
+          -backend-config="region=${TF_STATE_REGION}" \
+          -backend-config="dynamodb_table=${TF_LOCK_TABLE}" \
+          -backend-config="kms_key_id=${TF_STATE_KMS_KEY_ARN}" \
+          -backend-config="encrypt=true"
+
+        # A saved plan carries its variables (including aws_profile = "spoke").
+        # If state moved since the plan, Terraform refuses it as stale -> re-run the pipeline.
+        terraform apply -auto-approve -lock-timeout=5m tfplan
+
+        terraform output -json > outputs.json
+        echo "Applied $REPO_FULL_NAME@$COMMIT_ID ($ENVIRONMENT) with platform $PLATFORM_VERSION"
+
+  post_build:
+    commands:
+      - rm -f ~/.aws/credentials

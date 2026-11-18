@@ -23,6 +23,7 @@ declare -A PINS=(
   [kms]=v4.2.2
   [security-group]=v6.0.0
   [s3-bucket]=v5.18.0
+  [rds]=v7.2.2
 )
 
 if [[ $# -eq 2 ]]; then

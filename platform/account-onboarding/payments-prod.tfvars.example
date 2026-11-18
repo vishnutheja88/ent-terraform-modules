@@ -1,0 +1,5 @@
+region           = "us-east-1"
+team             = "payments"
+environment      = "prod"
+repository_name  = "app-team-payments-infra"
+spoke_account_id = "222222222222" # team-payments-prod

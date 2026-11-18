@@ -1,0 +1,13 @@
+---
+# Defense in depth: no unencrypted EBS volumes even if a future module adds EC2.
+metadata:
+  id: "CKV2_PLAT_6"
+  name: "EBS volumes must be encrypted"
+  category: "ENCRYPTION"
+definition:
+  cond_type: "attribute"
+  resource_types:
+    - "aws_ebs_volume"
+  attribute: "encrypted"
+  operator: "equals"
+  value: true

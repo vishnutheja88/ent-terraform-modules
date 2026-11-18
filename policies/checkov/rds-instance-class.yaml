@@ -1,0 +1,19 @@
+---
+metadata:
+  id: "CKV2_PLAT_3"
+  name: "RDS instance class must be on the platform allowlist"
+  category: "GENERAL_SECURITY"
+definition:
+  cond_type: "attribute"
+  resource_types:
+    - "aws_db_instance"
+  attribute: "instance_class"
+  operator: "within"
+  value:
+    - "db.t4g.micro"
+    - "db.t4g.small"
+    - "db.t4g.medium"
+    - "db.m7g.large"
+    - "db.m7g.xlarge"
+    - "db.r7g.large"
+    - "db.r7g.xlarge"

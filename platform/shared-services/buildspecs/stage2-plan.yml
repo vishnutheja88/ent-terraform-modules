@@ -1,0 +1,132 @@
+# =============================================================================
+# STAGE 2 - Validation, plan & policy-as-code
+#
+# Input  : "workspace" artifact from Stage 1
+# Output : "planned_workspace" artifact = workspace + stack-wrapper/tfplan (+ .json/.txt)
+# Exports: PLAN_ADD, PLAN_CHANGE, PLAN_DESTROY (used in the prod approval message)
+#
+# Credentials:
+#   - default chain = Shared Services CodeBuild role -> S3 state + DynamoDB lock
+#   - profile "spoke" = PlatformTerraformDeployRole in the target account,
+#     assumed with ExternalId + session tags (platform-repo, platform-env)
+# IAM needed: sts:AssumeRole + sts:TagSession on PlatformTerraformDeployRole,
+#   dynamodb:GetItem (registry), ssm:GetParameter (/platform/*), S3 state rw,
+#   DynamoDB lock rw, kms on the platform key
+# =============================================================================
+version: 0.2
+
+env:
+  shell: bash
+  exported-variables:
+    - PLAN_ADD
+    - PLAN_CHANGE
+    - PLAN_DESTROY
+
+phases:
+  install:
+    commands:
+      - |
+        set -euo pipefail
+        # Terraform, checksum-verified
+        cd /tmp
+        curl -sSfLO "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+        curl -sSfLO "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_SHA256SUMS"
+        grep "terraform_${TF_VERSION}_linux_amd64.zip" "terraform_${TF_VERSION}_SHA256SUMS" | sha256sum -c -
+        unzip -o -q "terraform_${TF_VERSION}_linux_amd64.zip" -d /usr/local/bin
+        terraform version
+        pip3 install --quiet "checkov==${CHECKOV_VERSION}"
+
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+        WS="$CODEBUILD_SRC_DIR"
+        source "$WS/.platform/metadata.env"
+
+        # ---- Re-read the registry: ExternalId never travels in an artifact
+        ITEM=$(aws dynamodb get-item --consistent-read --table-name "$REGISTRY_TABLE" \
+                 --key "{\"registry_key\":{\"S\":\"${REGISTRY_KEY}\"}}" --output json)
+        EXTERNAL_ID=$(echo "$ITEM" | jq -r '.Item.external_id.S')
+        [ "$(echo "$ITEM" | jq -r '.Item.cross_account_role_arn.S')" = "$ROLE_ARN" ] || { echo "ERROR: registry changed since Stage 1"; exit 1; }
+
+        # ---- Subordinate CA ARN from SSM (read with the CodeBuild role, before switching)
+        SUB_CA_ARN=$(aws ssm get-parameter --name "$SUBORDINATE_CA_PARAM" --query Parameter.Value --output text)
+
+        # ---- Assume the spoke role into a named profile (backend keeps CodeBuild creds)
+        CREDS=$(aws sts assume-role \
+                  --role-arn "$ROLE_ARN" \
+                  --role-session-name "plat-${ENVIRONMENT}-${COMMIT_ID:0:12}" \
+                  --external-id "$EXTERNAL_ID" \
+                  --tags "Key=platform-repo,Value=${REPO_NAME}" "Key=platform-env,Value=${ENVIRONMENT}" \
+                  --duration-seconds 3600 --output json)
+        aws configure set aws_access_key_id     "$(echo "$CREDS" | jq -r .Credentials.AccessKeyId)"     --profile spoke
+        aws configure set aws_secret_access_key "$(echo "$CREDS" | jq -r .Credentials.SecretAccessKey)" --profile spoke
+        aws configure set aws_session_token     "$(echo "$CREDS" | jq -r .Credentials.SessionToken)"    --profile spoke
+        unset CREDS EXTERNAL_ID
+        [ "$(aws sts get-caller-identity --profile spoke --query Account --output text)" = "$TARGET_ACCOUNT_ID" ] \
+          || { echo "ERROR: assumed role is not in $TARGET_ACCOUNT_ID"; exit 1; }
+
+        # ---- Inputs for stack-wrapper (all injected, none hardcoded)
+        cat > "$WS/.platform/tfvars.env" <<EOF
+        export TF_IN_AUTOMATION=true
+        export TF_INPUT=0
+        export TF_VAR_target_account_id=$TARGET_ACCOUNT_ID
+        export TF_VAR_environment=$ENVIRONMENT
+        export TF_VAR_platform_version=$PLATFORM_VERSION
+        export TF_VAR_subordinate_ca_arn=$SUB_CA_ARN
+        export TF_VAR_aws_profile=spoke
+        export TF_VAR_source_repo=$REPO_FULL_NAME
+        export TF_VAR_source_commit=$COMMIT_ID
+        EOF
+
+  build:
+    commands:
+      - |
+        set -euo pipefail
+        WS="$CODEBUILD_SRC_DIR"
+        source "$WS/.platform/metadata.env"
+        source "$WS/.platform/tfvars.env"
+        cd "$WS/stack-wrapper"
+
+        terraform fmt -check -recursive "$WS/stack-wrapper" "$WS/modules" || echo "WARN: platform code is not terraform-fmt clean"
+
+        terraform init \
+          -backend-config="bucket=${TF_STATE_BUCKET}" \
+          -backend-config="key=${STATE_KEY}" \
+          -backend-config="region=${TF_STATE_REGION}" \
+          -backend-config="dynamodb_table=${TF_LOCK_TABLE}" \
+          -backend-config="kms_key_id=${TF_STATE_KMS_KEY_ARN}" \
+          -backend-config="encrypt=true"
+
+        terraform validate
+
+        # Variable validation blocks run here: bad values.yaml fails before any API call that changes things.
+        terraform plan -var="values_file=values.yaml" -out=tfplan -lock-timeout=5m
+
+        terraform show -json tfplan > tfplan.json
+        terraform show -no-color tfplan > tfplan.txt
+
+        # ---- Policy as code: platform Checkov policies, hard fail
+        CHECKS=$(grep -h '^  id:' "$WS"/policies/checkov/*.yaml | awk '{print $2}' | tr -d '"' | paste -sd, -)
+        checkov -f tfplan.json --framework terraform_plan \
+          --external-checks-dir "$WS/policies/checkov" \
+          --check "$CHECKS" \
+          --compact --quiet
+
+        # ---- Summary for the approval notification
+        export PLAN_ADD=$(jq '[(.resource_changes // [])[] | select(.change.actions | index("create"))] | length' tfplan.json)
+        export PLAN_CHANGE=$(jq '[(.resource_changes // [])[] | select(.change.actions == ["update"])] | length' tfplan.json)
+        export PLAN_DESTROY=$(jq '[(.resource_changes // [])[] | select(.change.actions | index("delete"))] | length' tfplan.json)
+        echo "Plan: +$PLAN_ADD ~$PLAN_CHANGE -$PLAN_DESTROY"
+
+  post_build:
+    commands:
+      # Credentials and the injected-vars file must not leave this build.
+      - rm -f "$CODEBUILD_SRC_DIR/.platform/tfvars.env" ~/.aws/credentials
+
+artifacts:
+  files:
+    - "**/*"
+  exclude-paths:
+    - "stack-wrapper/.terraform/**/*"
+  enable-symlinks: no

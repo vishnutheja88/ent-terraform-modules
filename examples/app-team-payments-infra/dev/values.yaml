@@ -1,0 +1,49 @@
+# app-team-payments-infra / dev
+# The ONLY file the team edits for dev. Push to main -> plat-payments-dev runs:
+# assemble -> plan + Checkov -> apply (no approval in dev).
+platform_version: "v1.0.0"     # tag of platform-terraform-modules; bump to upgrade
+
+team: payments
+environment: dev               # must match this folder
+app_name: checkout
+region: us-east-1
+
+tags:
+  CostCenter: "4410"
+  Owner: payments-team
+
+networking:
+  enabled: true
+  vpc_cidr: 10.40.0.0/16
+  az_count: 2
+  nat_gateway: single          # none | single | per_az
+
+tls:
+  enabled: true                # private cert from the RAM-shared Subordinate CA
+  domain_name: checkout.payments.dev.corp.internal
+
+ecs:
+  enabled: true
+  alb_internal: true
+  alb_ingress_cidrs: [10.0.0.0/8]
+  services:
+    api:
+      image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/checkout-api:1.4.2
+      cpu: 512
+      memory: 1024
+      desired_count: 1
+      container_port: 8080
+      health_check_path: /health
+      path_pattern: "/*"
+      environment:
+        LOG_LEVEL: debug
+
+rds:
+  enabled: true
+  engine: postgres
+  engine_version: "16"
+  instance_class: db.t4g.medium
+  allocated_storage: 20
+  max_allocated_storage: 100
+  multi_az: false
+  db_name: checkout

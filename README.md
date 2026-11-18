@@ -10,12 +10,19 @@ envs/<env>/*.yaml  ─►  blueprints/<name>/  ─►  modules/<wrapper>  ─►
                         toggles + rules)        org defaults)           terraform-aws-modules)
 ```
 
+## Two ways to use this repo
+
+| Model | Who writes values | Where it runs | Start here |
+|---|---|---|---|
+| **Self-service platform (config-only)** | App teams, in their own `app-team-<name>-infra` repos | Central pipelines in a Shared Services account, deploying into each team's spoke account, with private TLS from a RAM-shared Subordinate CA | [`docs/self-service-platform.md`](docs/self-service-platform.md), `stack-wrapper/`, `platform/` |
+| Rafay-style blueprints (single repo) | Platform team, in `envs/` of this repo | One pipeline per values file in one account | sections below, `blueprints/` |
+
 ## What's inside
 
 | Layer | Path | Rafay equivalent | Owner |
 |---|---|---|---|
-| Upstream | `upstream/terraform-aws-{vpc,ec2-instance,iam,route53,eks,kms,security-group,s3-bucket}` | — | synced by script, never hand-edited |
-| Wrappers | `modules/{vpc,ec2,iam-role,route53,eks,security-group,s3,irsa}` | Resource Templates | Platform team |
+| Upstream | `upstream/terraform-aws-{vpc,ec2-instance,iam,route53,eks,kms,security-group,s3-bucket,rds}` | — | synced by script, never hand-edited |
+| Wrappers | `modules/{vpc,ec2,iam-role,route53,eks,security-group,s3,irsa,networking,ecs,rds,acm-private-cert}` | Resource Templates | Platform team |
 | Blueprints | `blueprints/platform/`, `blueprints/app-s3-irsa/` | Environment Templates | Platform team |
 | Guardrails | `schema/<blueprint>.schema.json` | Allowed values / selectors | Platform team |
 | Inputs | `envs/<env>/platform.yaml`, `envs/<env>/apps/<app>.yaml` | Environments | Platform team / **app teams** |

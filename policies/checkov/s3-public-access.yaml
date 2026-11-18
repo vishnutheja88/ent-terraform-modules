@@ -1,0 +1,28 @@
+---
+# Any S3 bucket a stack creates must have all four public-access blocks on.
+metadata:
+  id: "CKV2_PLAT_4"
+  name: "S3 public access block must block everything"
+  category: "GENERAL_SECURITY"
+definition:
+  and:
+    - cond_type: "attribute"
+      resource_types: ["aws_s3_bucket_public_access_block"]
+      attribute: "block_public_acls"
+      operator: "equals"
+      value: true
+    - cond_type: "attribute"
+      resource_types: ["aws_s3_bucket_public_access_block"]
+      attribute: "block_public_policy"
+      operator: "equals"
+      value: true
+    - cond_type: "attribute"
+      resource_types: ["aws_s3_bucket_public_access_block"]
+      attribute: "ignore_public_acls"
+      operator: "equals"
+      value: true
+    - cond_type: "attribute"
+      resource_types: ["aws_s3_bucket_public_access_block"]
+      attribute: "restrict_public_buckets"
+      operator: "equals"
+      value: true

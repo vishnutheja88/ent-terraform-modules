@@ -1,0 +1,49 @@
+# app-team-payments-infra / prod
+# Push to main -> plat-payments-prod: assemble -> plan + Checkov -> MANUAL APPROVAL (SNS) -> apply.
+# Prod guardrails (enforced at plan): multi_az RDS, >= 2 tasks per service, a NAT gateway.
+platform_version: "v1.0.0"     # upgrade prod only after dev/staging ran the new tag
+
+team: payments
+environment: prod
+app_name: checkout
+region: us-east-1
+
+tags:
+  CostCenter: "4410"
+  Owner: payments-team
+  DataClassification: confidential
+
+networking:
+  enabled: true
+  vpc_cidr: 10.42.0.0/16
+  az_count: 3
+  nat_gateway: per_az
+
+tls:
+  enabled: true
+  domain_name: checkout.payments.corp.internal
+  subject_alternative_names:
+    - api.checkout.payments.corp.internal
+
+ecs:
+  enabled: true
+  alb_internal: true
+  alb_ingress_cidrs: [10.0.0.0/8]
+  services:
+    api:
+      image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/checkout-api@sha256:4f3c2b1a0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b
+      cpu: 1024
+      memory: 2048
+      desired_count: 3
+      container_port: 8080
+      health_check_path: /health
+
+rds:
+  enabled: true
+  engine: postgres
+  engine_version: "16"
+  instance_class: db.m7g.large
+  allocated_storage: 100
+  max_allocated_storage: 500
+  multi_az: true
+  db_name: checkout

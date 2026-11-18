@@ -1,0 +1,97 @@
+# =============================================================================
+# STAGE 1 - Dynamic workspace assembly & account lookup
+#
+# Input  : the team repo at the pushed commit (CODE_ZIP from CodeConnections)
+# Output : "workspace" artifact (KMS-encrypted in the pipeline artifact bucket):
+#            stack-wrapper/   modules/   upstream/   policies/   (platform @ tag)
+#            stack-wrapper/values.yaml                            (team input)
+#            .platform/metadata.env                               (run metadata)
+#
+# Pipeline env  : ENVIRONMENT, VALUES_PATH, REPO_FULL_NAME, BRANCH, COMMIT_ID
+# Project env   : REGISTRY_TABLE, PLATFORM_REPO_URL, PLATFORM_REPO_TOKEN (Secrets Manager)
+# IAM needed    : dynamodb:GetItem on the registry, secretsmanager:GetSecretValue on the token
+# =============================================================================
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    commands:
+      - pip3 install --quiet pyyaml
+
+  build:
+    commands:
+      - |
+        set -euo pipefail
+        SRC="$CODEBUILD_SRC_DIR"
+        REPO_NAME="${REPO_FULL_NAME##*/}"            # owner/app-team-x-infra -> app-team-x-infra
+        echo "Repo=$REPO_NAME Branch=$BRANCH Commit=$COMMIT_ID Path=$VALUES_PATH"
+
+        # ---- 1. Environment comes from the changed path, and must match the pipeline
+        ENV_FROM_PATH="${VALUES_PATH%%/*}"
+        case "$ENV_FROM_PATH" in dev|staging|prod) ;; *) echo "ERROR: unsupported folder '$ENV_FROM_PATH'"; exit 1;; esac
+        [ "$ENV_FROM_PATH" = "$ENVIRONMENT" ] || { echo "ERROR: path env '$ENV_FROM_PATH' != pipeline env '$ENVIRONMENT'"; exit 1; }
+        [ -f "$SRC/$VALUES_PATH" ] || { echo "ERROR: $VALUES_PATH not found in $REPO_NAME"; exit 1; }
+
+        # ---- 2. Config-only model: team repos must not contain Terraform
+        if find "$SRC" -type f \( -name '*.tf' -o -name '*.tf.json' -o -name '*.tfvars' \) | grep -q .; then
+          echo "ERROR: team repositories may only contain values.yaml files (found Terraform files)"; exit 1
+        fi
+
+        # ---- 3. platform_version: must be an immutable release tag
+        PLATFORM_VERSION=$(python3 -c 'import sys,yaml; print(yaml.safe_load(open(sys.argv[1])).get("platform_version",""))' "$SRC/$VALUES_PATH")
+        [[ "$PLATFORM_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "ERROR: platform_version '$PLATFORM_VERSION' must look like v1.2.0"; exit 1; }
+
+        # ---- 4. Account Registry lookup: <repo_name>#<environment>
+        KEY="${REPO_NAME}#${ENVIRONMENT}"
+        ITEM=$(aws dynamodb get-item --consistent-read \
+                 --table-name "$REGISTRY_TABLE" \
+                 --key "{\"registry_key\":{\"S\":\"${KEY}\"}}" \
+                 --output json)
+        [ "$(echo "$ITEM" | jq -r '.Item // empty | length')" != "" ] || { echo "ERROR: $KEY is not onboarded in $REGISTRY_TABLE"; exit 1; }
+        TARGET_ACCOUNT_ID=$(echo "$ITEM" | jq -r '.Item.target_account_id.S')
+        ROLE_ARN=$(echo "$ITEM"          | jq -r '.Item.cross_account_role_arn.S')
+        STATE_KEY=$(echo "$ITEM"         | jq -r '.Item.tf_state_key.S')
+        TEAM=$(echo "$ITEM"              | jq -r '.Item.team.S')
+        [[ "$TARGET_ACCOUNT_ID" =~ ^[0-9]{12}$ ]] || { echo "ERROR: bad target_account_id in registry"; exit 1; }
+        [[ "$ROLE_ARN" == *":${TARGET_ACCOUNT_ID}:role/PlatformTerraformDeployRole" ]] || { echo "ERROR: registry role ARN does not match account"; exit 1; }
+
+        # ---- 5. Clone platform-terraform-modules at EXACTLY that tag
+        AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PLATFORM_REPO_TOKEN" | base64 -w0)"
+        git -c http.extraHeader="$AUTH" ls-remote --exit-code --tags "$PLATFORM_REPO_URL" "refs/tags/${PLATFORM_VERSION}" >/dev/null \
+          || { echo "ERROR: tag $PLATFORM_VERSION does not exist in platform-terraform-modules"; exit 1; }
+        rm -rf /tmp/platform
+        git -c http.extraHeader="$AUTH" -c advice.detachedHead=false clone --quiet --depth 1 --branch "$PLATFORM_VERSION" "$PLATFORM_REPO_URL" /tmp/platform
+        PLATFORM_COMMIT=$(git -C /tmp/platform rev-parse HEAD)
+        unset AUTH PLATFORM_REPO_TOKEN
+
+        # ---- 6. Assemble a clean workspace (stack-wrapper keeps its ../modules paths)
+        WS="$SRC/workspace"        # the "/workspace" of the design; must sit under SRC to be an artifact
+        rm -rf "$WS" && mkdir -p "$WS/.platform"
+        cp -R /tmp/platform/stack-wrapper /tmp/platform/modules /tmp/platform/upstream /tmp/platform/policies "$WS/"
+        cp "$SRC/$VALUES_PATH" "$WS/stack-wrapper/values.yaml"
+
+        # ---- 7. Metadata for stages 2 and 3 (no secrets; ExternalId is re-read from the registry)
+        {
+          printf 'REPO_NAME=%q\n'         "$REPO_NAME"
+          printf 'REPO_FULL_NAME=%q\n'    "$REPO_FULL_NAME"
+          printf 'COMMIT_ID=%q\n'         "$COMMIT_ID"
+          printf 'BRANCH=%q\n'            "$BRANCH"
+          printf 'ENVIRONMENT=%q\n'       "$ENVIRONMENT"
+          printf 'TEAM=%q\n'              "$TEAM"
+          printf 'REGISTRY_KEY=%q\n'      "$KEY"
+          printf 'TARGET_ACCOUNT_ID=%q\n' "$TARGET_ACCOUNT_ID"
+          printf 'ROLE_ARN=%q\n'          "$ROLE_ARN"
+          printf 'STATE_KEY=%q\n'         "$STATE_KEY"
+          printf 'PLATFORM_VERSION=%q\n'  "$PLATFORM_VERSION"
+          printf 'PLATFORM_COMMIT=%q\n'   "$PLATFORM_COMMIT"
+        } > "$WS/.platform/metadata.env"
+        cat "$WS/.platform/metadata.env"
+
+artifacts:
+  base-directory: workspace
+  files:
+    - "**/*"
+  enable-symlinks: no
