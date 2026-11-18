@@ -1,0 +1,10 @@
+region          = "us-east-1"
+source_provider = "GitHub" # or "Bitbucket"
+repository_id   = "vishnutheja88/ent-terraform-modules"
+branch          = "main"
+approver_emails = ["you@example.com"]
+
+environments = {
+  dev  = { require_approval = false }
+  prod = { require_approval = true }
+}

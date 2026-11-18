@@ -1,0 +1,65 @@
+# ------------------------------------------------------------------
+# The ONLY file app teams edit. Flip toggles -> PR -> merge.
+# Pipeline: schema check -> plan -> (approval) -> apply
+# ------------------------------------------------------------------
+env: dev
+region: us-east-1
+name_prefix: ent
+# account_role: arn:aws:iam::111122223333:role/tf-deploy   # optional cross-account
+
+tags:
+  Owner: platform-team
+  CostCenter: "1234"
+
+vpc:
+  enabled: true
+  cidr: 10.20.0.0/16
+  az_count: 2
+  nat_gateway: true          # needed for EKS nodes / private EC2 internet egress
+  single_nat_gateway: true   # cheaper for dev
+  flow_logs: false
+
+igw:
+  enabled: true
+
+ec2:
+  enabled: true
+  public: false
+  instance_type: t3.micro
+  count: 1
+  root_volume_gb: 20
+  ingress_ports: [443]
+  ingress_cidrs: [10.20.0.0/16]
+
+iam:
+  enabled: true
+  # permissions_boundary_arn: arn:aws:iam::111122223333:policy/org-boundary
+  roles:
+    app-reader:
+      trusted_services: [ec2.amazonaws.com]
+      instance_profile: true
+      policy_arns:
+        s3ro: arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+route53:
+  enabled: true
+  zone_name: dev.ent.internal
+  private: true
+  records:
+    app:
+      type: A
+      ttl: 300
+      records: [10.20.128.10]
+
+eks:
+  enabled: false             # flip to true to build a cluster (~15 min, has cost)
+  version: "1.34"   # check current EKS standard-support versions
+  public_endpoint: true
+  public_endpoint_cidrs: [0.0.0.0/0]
+  node_groups:
+    general:
+      instance_types: [t3.large]
+      min_size: 1
+      max_size: 3
+      desired_size: 2
+  extra_addons: {}

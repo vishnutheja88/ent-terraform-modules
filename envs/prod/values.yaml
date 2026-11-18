@@ -1,0 +1,44 @@
+env: prod
+region: us-east-1
+name_prefix: ent
+# account_role: arn:aws:iam::444455556666:role/tf-deploy
+
+tags:
+  Owner: platform-team
+  CostCenter: "1234"
+
+vpc:
+  enabled: true
+  cidr: 10.30.0.0/16
+  az_count: 3
+  nat_gateway: true
+  single_nat_gateway: false  # one NAT per AZ for HA
+  flow_logs: true
+
+igw:
+  enabled: true
+
+ec2:
+  enabled: false
+
+iam:
+  enabled: false
+
+route53:
+  enabled: true
+  zone_name: prod.ent.internal
+  private: true
+  records: {}
+
+eks:
+  enabled: true
+  version: "1.34"   # check current EKS standard-support versions
+  public_endpoint: false
+  node_groups:
+    general:
+      instance_types: [m6i.large]
+      min_size: 2
+      max_size: 6
+      desired_size: 3
+  extra_addons:
+    aws-ebs-csi-driver: {}
